@@ -1,0 +1,99 @@
+name: Flask CI/CD Pipeline
+# 触发条件：向main分支push代码自动执行流水线
+on:
+  push:
+    branches: [ main ]
+
+# 定义4个任务：测试校验、构建镜像、远程部署、部署通知
+jobs:
+  # 任务1：代码校验+单元测试 CI环节
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 配置Python3.10环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: 安装项目依赖
+        run: |
+          python3 -m pip install --upgrade pip
+          pip3 install -r requirements.txt
+
+      - name: 执行单元测试
+        run: python3 test_app.py
+
+  # 任务2：构建Docker镜像，打包成tar压缩包
+  build-image:
+    runs-on: ubuntu-latest
+    needs: test # 必须test任务成功才执行构建
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装Docker环境
+        uses: docker/setup-buildx-action@v3
+
+      - name: 构建本地镜像
+        run: docker build -t flask-web:latest .
+
+      - name: 镜像打包为tar文件
+        run: docker save flask-web:latest -o flask-web.tar
+
+      - name: 上传镜像包为流水线产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image-tar
+          path: flask-web.tar
+
+  # 任务3：SCP传输镜像到ECS + SSH远程部署 CD核心
+  deploy-server:
+    runs-on: ubuntu-latest
+    needs: build-image # 构建镜像完成后部署
+    steps:
+      - name: 下载打包好的镜像文件
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image-tar
+
+      - name: 安装sshpass工具（密码登录SSH）
+        run: sudo apt update && sudo apt install sshpass -y
+
+      - name: SCP上传镜像到云服务器
+        env:
+          SERVER_IP: ${{ secrets.SERVER_IP }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PWD: ${{ secrets.SERVER_PWD }}
+          SERVER_PATH: ${{ secrets.SERVER_PATH }}
+        run: |
+          sshpass -p "$SERVER_PWD" scp -o StrictHostKeyChecking=no flask-web.tar $SERVER_USER@$SERVER_IP:$SERVER_PATH/
+
+      - name: SSH远程执行部署脚本
+        env:
+          SERVER_IP: ${{ secrets.SERVER_IP }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PWD: ${{ secrets.SERVER_PWD }}
+          SERVER_PATH: ${{ secrets.SERVER_PATH }}
+        run: |
+          sshpass -p "$SERVER_PWD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP << EOF
+            cd $SERVER_PATH
+            # 加载docker镜像
+            docker load -i flask-web.tar
+            # 停止并删除旧容器（避免端口占用）
+            docker rm -f flask-cicd || true
+            # 使用docker-compose生产配置启动服务
+            docker-compose -f docker-compose.prod.yml up -d
+            # 查看运行容器
+            docker ps
+          EOF
+
+  # 任务4：部署完成日志通知
+  notify:
+    runs-on: ubuntu-latest
+    needs: deploy-server
+    steps:
+      - name: 部署成功提示
+        run: echo "CI/CD流水线全部执行完成，服务器Flask应用部署成功！"

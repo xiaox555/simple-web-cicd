@@ -79,15 +79,21 @@ jobs:
           SERVER_PATH: ${{ secrets.SERVER_PATH }}
         run: |
           sshpass -p "$SERVER_PWD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP << EOF
-            cd $SERVER_PATH
-            # 加载docker镜像
-            docker load -i flask-web.tar
-            # 停止并删除旧容器（避免端口占用）
-            docker rm -f flask-cicd || true
-            # 使用docker-compose生产配置启动服务
-            docker-compose -f docker-compose.prod.yml up -d
-            # 查看运行容器
-            docker ps
+          # 1. 安装docker-compose（Alibaba Cloud Linux dnf）
+          sudo dnf install docker-compose -y
+          # 2. 当前用户加入docker组，解决docker ps权限拒绝
+          echo $SERVER_PWD | sudo -S usermod -aG docker $SERVER_USER
+          newgrp docker
+          # 3. 切换到部署目录
+          cd $SERVER_PATH
+          # 4. 加载镜像（你原有逻辑）
+          docker load -i flask-web.tar
+          # 5. 删除旧容器，不存在则跳过 || true
+          docker rm -f flask-cicd || true
+          # 6. 后台启动服务
+          docker-compose -f docker-compose.prod.yml up -d
+          # 7. 查看运行容器
+          docker ps
           EOF
 
   # 任务4：部署完成日志通知

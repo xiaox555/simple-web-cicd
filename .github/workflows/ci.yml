@@ -90,7 +90,7 @@ jobs:
           cat > docker-compose.prod.yml << YML
           services:
             web:
-              image: simple-web:latest
+              image: flask-web:latest
               ports:
                 - "80:8080"
               restart: unless-stopped

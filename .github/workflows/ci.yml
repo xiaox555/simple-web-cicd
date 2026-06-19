@@ -78,19 +78,28 @@ jobs:
           SERVER_PWD: ${{ secrets.SERVER_PWD }}
           SERVER_PATH: ${{ secrets.SERVER_PATH }}
         run: |
-          # 远程自动创建部署目录
           sshpass -p "$SERVER_PWD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "mkdir -p $SERVER_PATH"
-          # 1. 上传镜像tar包
+          # 仅上传镜像tar包
           sshpass -p "$SERVER_PWD" scp -o StrictHostKeyChecking=no flask-web.tar $SERVER_USER@$SERVER_IP:$SERVER_PATH/
-          # 2. 上传docker-compose配置文件（关键修复，之前没传）
-          sshpass -p "$SERVER_PWD" scp -o StrictHostKeyChecking=no docker-compose.prod.yml $SERVER_USER@$SERVER_IP:$SERVER_PATH/
-          # 远程执行部署脚本，EOF必须顶格，不能缩进
+          # 远程执行部署
           sshpass -p "$SERVER_PWD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP << EOF
           echo $SERVER_PWD | sudo -S usermod -aG docker $SERVER_USER
           newgrp docker
           cd $SERVER_PATH
+          # 远程直接生成docker-compose.prod.yml，不用本地文件
+          cat > docker-compose.prod.yml << YML
+          services:
+            web:
+              image: simple-web:latest
+              ports:
+                - "80:8080"
+              restart: unless-stopped
+          YML
+          # 加载镜像
           docker load -i flask-web.tar
+          # 删除旧容器，不存在不报错
           docker rm -f flask-cicd || true
+          # 使用新版docker compose启动
           docker compose -f docker-compose.prod.yml up -d
           docker ps
           EOF

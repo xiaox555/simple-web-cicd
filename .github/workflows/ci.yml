@@ -99,8 +99,8 @@ jobs:
           docker load -i flask-web.tar
           # 删除旧容器，不存在不报错
           docker rm -f flask-cicd || true
-          # 使用新版docker compose启动
-          docker compose -f docker-compose.prod.yml up -d
+           # 7. --pull never 禁止远程拉取镜像，只使用本地已导入镜像
+          docker compose -f docker-compose.prod.yml up -d --pull never
           docker ps
           EOF
 

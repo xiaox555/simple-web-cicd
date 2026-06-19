@@ -78,19 +78,20 @@ jobs:
           SERVER_PWD: ${{ secrets.SERVER_PWD }}
           SERVER_PATH: ${{ secrets.SERVER_PATH }}
         run: |
-         sshpass -p "$SERVER_PWD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP << EOF
-          # 1. 将当前用户加入docker组，解决docker权限拒绝
+          # 远程自动创建部署目录
+          sshpass -p "$SERVER_PWD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "mkdir -p $SERVER_PATH"
+          # 1. 上传镜像tar包
+          sshpass -p "$SERVER_PWD" scp -o StrictHostKeyChecking=no flask-web.tar $SERVER_USER@$SERVER_IP:$SERVER_PATH/
+          # 2. 上传docker-compose配置文件（关键修复，之前没传）
+          sshpass -p "$SERVER_PWD" scp -o StrictHostKeyChecking=no docker-compose.prod.yml $SERVER_USER@$SERVER_IP:$SERVER_PATH/
+          # 远程执行部署脚本，EOF必须顶格，不能缩进
+          sshpass -p "$SERVER_PWD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP << EOF
           echo $SERVER_PWD | sudo -S usermod -aG docker $SERVER_USER
           newgrp docker
-          # 2. 切换到部署目录
           cd $SERVER_PATH
-          # 3. 加载上传的镜像
           docker load -i flask-web.tar
-          # 4. 删除旧容器，不存在则跳过 || true
           docker rm -f flask-cicd || true
-          # 5. 使用新版docker compose（空格，无横杠）启动服务
           docker compose -f docker-compose.prod.yml up -d
-          # 6. 查看运行容器验证
           docker ps
           EOF
 
